@@ -488,10 +488,19 @@ export async function render() {
           await loadAttendance();
           return 'out';
         }
-        // Only allow time out at or after 8:00 PM
+        // Before 8:00 PM: treat scan as emergency undertime time-out (limit 3 per day)
         if (compareTimesHHMM(nowTime, SHIFT_END) < 0) {
-          if (feedback) setFeedback(feedback, 'warning', 'You have time in already. Next scan is 8:00 PM for time out.');
-          return 'early';
+          const prevRemarks2 = row.remarks || '';
+          const usedCount = ((prevRemarks2.match(/\[emergency_scan_used\b/gi) || []).length) | 0;
+          if (usedCount >= 3) {
+            if (feedback) setFeedback(feedback, 'warning', 'Daily scan limit reached (3) for undertime emergencies.');
+            return 'limit';
+          }
+          const upd2 = { attendance_id: row.attendance_id, employee_id: employeeId, attendance_date: date, status: 'undertime', time_in: row.time_in || null, time_out: nowTime, remarks: (prevRemarks2 ? (prevRemarks2 + ' ') : '') + `[emergency_scan_used ${nowTime}]` };
+          await axios.post(`${window.baseApiUrl}/attendance.php`, buildFormData({ operation: 'updateAttendance', json: JSON.stringify(upd2) }));
+          if (feedback) setFeedback(feedback, 'success', 'Emergency scan recorded. Status set to Undertime.');
+          await loadAttendance();
+          return 'emergency';
         }
         // Disallow time out after 8:30 PM; require HR/Admin intervention
         if (compareTimesHHMM(nowTime, TIME_OUT_END) > 0) {
@@ -506,6 +515,19 @@ export async function render() {
         return 'out';
       }
 
+      // If employee had an emergency undertime earlier and it's still before 8:00 PM, allow resume: set back to Present and clear time_out
+      try {
+        const prevRemarks3 = row.remarks || '';
+        const usedCount3 = ((prevRemarks3.match(/\[emergency_scan_used\b/gi) || []).length) | 0;
+        if (compareTimesHHMM(nowTime, SHIFT_END) < 0 && usedCount3 > 0) {
+          const statusBack = compareTimesHHMM(row.time_in || nowTime, SHIFT_START) > 0 ? 'late' : 'present';
+          const upd3 = { attendance_id: row.attendance_id, employee_id: employeeId, attendance_date: date, status: statusBack, time_in: row.time_in || null, time_out: null, remarks: (prevRemarks3 ? (prevRemarks3 + ' ') : '') + `[resume_scan ${nowTime}]` };
+          await axios.post(`${window.baseApiUrl}/attendance.php`, buildFormData({ operation: 'updateAttendance', json: JSON.stringify(upd3) }));
+          if (feedback) setFeedback(feedback, 'success', 'Resumed.');
+          await loadAttendance();
+          return 'resume';
+        }
+      } catch {}
       if (feedback) setFeedback(feedback, 'info', 'Attendance already completed for today.');
       return 'done';
     } catch (e) {
@@ -575,19 +597,22 @@ export async function render() {
               if (a === 'in') return 'Time in recorded.';
               if (a === 'early') return 'You have time in already. Next scan is 8:00 PM for time out.';
               if (a === 'out') return 'Time out recorded.';
+              if (a === 'resume') return 'Resumed.';
               if (a === 'done') return 'Attendance already completed for today.';
               if (a === 'onleave') return 'You are on leave today, so you cannot record attendance.';
               if (a === 'absent_today') return 'You are absent today.';
               if (a === 'timeout_closed') return 'Please contact the admin to reopen the QR code scanner.';
+              if (a === 'emergency') return 'Emergency scan recorded. Status set to Undertime.';
+              if (a === 'limit') return 'Daily scan limit reached (3) for undertime emergencies.';
               if (a === 'error') return 'Failed to record attendance.';
               return 'Updated.';
             };
             if (feedback) setFeedback(
               feedback,
-              (action === 'in' || action === 'out') ? 'success' : (action === 'early' || action === 'onleave' || action === 'absent_today' || action === 'timeout_closed') ? 'warning' : (action === 'error') ? 'error' : 'info',
+              (action === 'in' || action === 'out' || action === 'emergency' || action === 'resume') ? 'success' : (action === 'early' || action === 'onleave' || action === 'absent_today' || action === 'timeout_closed' || action === 'limit') ? 'warning' : (action === 'error') ? 'error' : 'info',
               `${empName}: ${actionMsg(action)}`
             );
-            if (action === 'timeout_closed') { try { await stopScanner(true); } catch {} }
+            // Keep scanner running; rely on throttling and scanningBusy to avoid duplicate scans
             scanningBusy = false;
           }
         } catch (e) {
@@ -653,7 +678,6 @@ export async function render() {
             <div id="qr-feedback-att" class="text-sm text-center mt-2"></div>
             <div class="flex justify-center gap-2 mt-3">
               <button id="qr-stop-att" class="px-3 py-1 text-sm rounded border">Stop</button>
-              <button id="qr-resume-att" class="px-3 py-1 text-sm rounded border hidden">Scan Again</button>
             </div>
           </div>
           <div class="flex justify-end gap-2 border-t px-4 py-3">
@@ -667,12 +691,7 @@ export async function render() {
       modal.classList.add('hidden');
     }));
     const stopBtn = modal.querySelector('#qr-stop-att');
-    const resumeBtn = modal.querySelector('#qr-resume-att');
     if (stopBtn) stopBtn.addEventListener('click', async () => { await stopScanner(); });
-    if (resumeBtn) resumeBtn.addEventListener('click', async () => {
-      resumeBtn.classList.add('hidden');
-      await startScannerInto('qr-reader-att', 'qr-feedback-att', 'qr-resume-att');
-    });
   }
 
   document.getElementById('btn-qr-scan')?.addEventListener('click', async () => {

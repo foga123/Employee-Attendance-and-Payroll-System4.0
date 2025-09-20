@@ -339,14 +339,36 @@ async function recordScan(code, mode) {
         };
       }
 
-      // Regular time-out validation
+      // Emergency early-out before 8:00 PM (limit 3 per day)
       if (compareTimesHHMM(nowTime, SHIFT_END) < 0) {
-        return { 
-          ok: false, 
-          error: 'You have time in already. Next scan is 8:00 PM for time out.' 
+        const prevRemarks = row.remarks || '';
+        const usedCount = ((prevRemarks.match(/\[emergency_scan_used\b/gi) || []).length) | 0;
+        if (usedCount >= 3) {
+          return { ok: false, error: 'Daily scan limit reached (3) for undertime emergencies.' };
+        }
+        const upd2 = {
+          attendance_id: row.attendance_id,
+          employee_id: employeeId,
+          attendance_date: date,
+          status: 'undertime',
+          time_in: row.time_in,
+          time_out: nowTime,
+          remarks: (prevRemarks ? (prevRemarks + ' ') : '') + `[emergency_scan_used ${nowTime}]`
+        };
+        await axios.post(`${CONFIG.baseApiUrl}/attendance.php`,
+          buildFormData({ operation: 'updateAttendance', json: JSON.stringify(upd2) })
+        );
+        return {
+          ok: true,
+          data: {
+            action: 'emergency',
+            message: 'Emergency scan recorded. Status set to Undertime',
+            time: nowTime
+          }
         };
       }
 
+      // Disallow time-out after 8:30 PM
       if (compareTimesHHMM(nowTime, TIME_OUT_END) > 0) {
         return { 
           ok: false, 
@@ -354,7 +376,7 @@ async function recordScan(code, mode) {
         };
       }
 
-      // Record time-out
+      // Record normal time-out (8:00–8:30 PM) and preserve existing status (late remains late)
       const upd = {
         attendance_id: row.attendance_id,
         employee_id: employeeId,
@@ -379,7 +401,37 @@ async function recordScan(code, mode) {
       };
     }
 
-    // Both time-in and time-out are already recorded
+    // Time-in and time-out already recorded
+    // Allow resume before 8:00 PM if an emergency early-out was used
+    try {
+      const prevRemarks = row.remarks || '';
+      const usedCount = ((prevRemarks.match(/\[emergency_scan_used\b/gi) || []).length) | 0;
+      if (compareTimesHHMM(nowTime, SHIFT_END) < 0 && usedCount > 0) {
+        const statusBack = compareTimesHHMM(row.time_in || nowTime, SHIFT_START) > 0 ? 'late' : 'present';
+        const upd3 = {
+          attendance_id: row.attendance_id,
+          employee_id: employeeId,
+          attendance_date: date,
+          status: statusBack,
+          time_in: row.time_in,
+          time_out: null,
+          remarks: (prevRemarks ? (prevRemarks + ' ') : '') + `[resume_scan ${nowTime}]`
+        };
+        await axios.post(`${CONFIG.baseApiUrl}/attendance.php`,
+          buildFormData({ operation: 'updateAttendance', json: JSON.stringify(upd3) })
+        );
+        return {
+          ok: true,
+          data: {
+            action: 'resume',
+            message: 'Resumed.',
+            time: nowTime
+          }
+        };
+      }
+    } catch (e) {}
+
+    // Otherwise, already completed
     return {
       ok: true,
       data: {
