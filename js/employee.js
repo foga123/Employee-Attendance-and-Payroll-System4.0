@@ -393,7 +393,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   handleEmpRoute(refreshedUser);
   window.addEventListener('hashchange', () => handleEmpRoute(refreshedUser));
-  wireLogout();
+  wireHelp();
   wireEmpProfileMenu();
   wireNewLeaveButtonDelegation();
 });
@@ -465,22 +465,30 @@ async function refreshUserData(user) {
   }
 }
 
-function wireLogout(){
-  const btn = document.getElementById('emp-logout');
+function wireHelp(){
+  const btn = document.getElementById('btn-help');
   if (btn){
-    btn.addEventListener('click', async () => {
-      try {
-        await axios.get(`${baseApiUrl}/auth.php`, { params: { operation: 'logout' }, withCredentials: true });
-      } catch {}
-
-      // Clear session storage
-      try {
-        sessionStorage.removeItem('currentUser');
-      } catch (e) {
-        console.log('Could not clear session storage');
-      }
-
-      location.href = './login.html';
+    btn.addEventListener('click', () => {
+      Swal.fire({
+        title: 'Help & Support',
+        html: `
+          <div class="text-left">
+            <p class="mb-3">Need assistance? Here are some ways to get help:</p>
+            <ul class="list-disc list-inside space-y-2 text-sm">
+              <li><strong>System Administrator:</strong> Contact your IT department</li>
+              <li><strong>HR Support:</strong> Reach out to your HR team</li>
+              <li><strong>Technical Issues:</strong> Report bugs or technical problems</li>
+              <li><strong>Training:</strong> Request additional training sessions</li>
+            </ul>
+            <p class="mt-4 text-sm text-gray-600">
+              For immediate assistance, please contact your system administrator or HR department.
+            </p>
+          </div>
+        `,
+        icon: 'info',
+        confirmButtonText: 'Got it',
+        confirmButtonColor: '#3b82f6'
+      });
     });
   }
 }
@@ -504,9 +512,22 @@ function wireEmpProfileMenu(){
   if (headerLogout){
     headerLogout.addEventListener('click', async (e) => {
       e.preventDefault();
-      try { await axios.get(`${baseApiUrl}/auth.php`, { params: { operation: 'logout' }, withCredentials: true }); } catch {}
-      try { sessionStorage.removeItem('currentUser'); } catch {}
-      location.href = './login.html';
+      const result = await Swal.fire({
+        title: 'Confirm Logout',
+        text: 'Are you sure you want to logout?',
+        icon: 'question',
+        showCancelButton: true,
+        confirmButtonColor: '#dc2626',
+        cancelButtonColor: '#6b7280',
+        confirmButtonText: 'Yes, logout',
+        cancelButtonText: 'Cancel'
+      });
+      
+      if (result.isConfirmed) {
+        try { await axios.get(`${baseApiUrl}/auth.php`, { params: { operation: 'logout' }, withCredentials: true }); } catch {}
+        try { sessionStorage.removeItem('currentUser'); } catch {}
+        location.href = './login.html';
+      }
     });
   }
 }

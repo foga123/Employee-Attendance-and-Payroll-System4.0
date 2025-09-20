@@ -1147,15 +1147,26 @@ export async function render() {
         <div class="mt-6 border-t pt-4">
           <div class="flex items-center justify-between mb-2">
             <h6 class="font-semibold">Holidays & Special Days</h6>
-            <button id="syscfg-hol-refresh" type="button" class="px-2 py-1 text-xs rounded border">Refresh</button>
+            <div class="flex items-center gap-2">
+              <button id="syscfg-hol-auto-generate" type="button" class="px-2 py-1 text-xs rounded bg-purple-600 text-white hover:bg-purple-700">Auto-Generate All Years</button>
+              <button id="syscfg-hol-refresh" type="button" class="px-2 py-1 text-xs rounded border">Refresh</button>
+            </div>
           </div>
           <div class="grid grid-cols-1 md:grid-cols-3 gap-2 mb-2">
             <input type="date" id="syscfg-hol-date" class="border rounded px-2 py-1 text-sm" />
             <input type="text" id="syscfg-hol-name" class="border rounded px-2 py-1 text-sm" placeholder="Name" />
             <input type="text" id="syscfg-hol-desc" class="border rounded px-2 py-1 text-sm" placeholder="Description (optional)" />
           </div>
+          <div class="flex items-center gap-2 mb-2">
+            <input type="checkbox" id="syscfg-hol-recurring" class="rounded border-gray-300 text-primary-600 focus:ring-primary-500" />
+            <label for="syscfg-hol-recurring" class="text-sm text-gray-700">Repeat every year (e.g., New Year, Christmas)</label>
+          </div>
           <div class="flex items-center gap-2 mb-3">
             <button id="syscfg-hol-add" type="button" class="px-2 py-1 text-xs rounded bg-primary-600 text-white hover:bg-primary-700">Add Holiday</button>
+            <div class="flex items-center gap-1">
+              <input type="number" id="syscfg-hol-year" class="w-20 border rounded px-2 py-1 text-sm" placeholder="2024" min="2020" max="2030" />
+              <button id="syscfg-hol-generate" type="button" class="px-2 py-1 text-xs rounded bg-green-600 text-white hover:bg-green-700">Generate Recurring</button>
+            </div>
             <span id="syscfg-hol-status" class="text-sm text-gray-600"></span>
           </div>
           <div class="overflow-x-auto border rounded">
@@ -1165,6 +1176,7 @@ export async function render() {
                   <th class="px-3 py-2 text-left">Date</th>
                   <th class="px-3 py-2 text-left">Name</th>
                   <th class="px-3 py-2 text-left">Description</th>
+                  <th class="px-3 py-2 text-left">Type</th>
                   <th class="px-3 py-2 text-left">Actions</th>
                 </tr>
               </thead>
@@ -1292,21 +1304,51 @@ export async function render() {
       if (!tbody || !empty) return;
       setHolStatus('Loading...');
       try {
-        const res = await axios.get(`${apiBase}/holidays.php`, { params: { operation: 'list' } });
+        // Load holidays for a wider range to show all holidays including recurring ones
+        const currentYear = new Date().getFullYear();
+        const startDate = `${currentYear - 1}-01-01`;
+        const endDate = `${currentYear + 5}-12-31`;
+        
+        const res = await axios.get(`${apiBase}/holidays.php`, { 
+          params: { 
+            operation: 'list',
+            start_date: startDate,
+            end_date: endDate
+          } 
+        });
         const rows = Array.isArray(res.data) ? res.data : [];
         if (!rows.length){
           tbody.innerHTML = '';
           empty.classList.remove('hidden');
         } else {
           empty.classList.add('hidden');
-          tbody.innerHTML = rows.map(r => `
-            <tr>
-              <td class="px-3 py-2">${escapeHtml(r.holiday_date || r.date || '')}</td>
-              <td class="px-3 py-2">${escapeHtml(r.holiday_name || r.name || '')}</td>
-              <td class="px-3 py-2">${escapeHtml(r.description || '')}</td>
-              <td class="px-3 py-2"><button class="px-2 py-1 text-xs rounded border text-red-600" data-hol-del-id="${r.id}">Delete</button></td>
-            </tr>
-          `).join('');
+          tbody.innerHTML = rows.map(r => {
+            const isGenerated = r.is_generated || (typeof r.id === 'string' && r.id.startsWith('recurring_'));
+            const isRecurring = r.is_recurring == 1;
+            
+            let typeBadge = '';
+            if (isGenerated) {
+              typeBadge = '<span class="px-2 py-1 text-xs rounded bg-green-100 text-green-800">Generated</span>';
+            } else if (isRecurring) {
+              typeBadge = '<span class="px-2 py-1 text-xs rounded bg-blue-100 text-blue-800">Recurring</span>';
+            } else {
+              typeBadge = '<span class="px-2 py-1 text-xs rounded bg-gray-100 text-gray-600">One-time</span>';
+            }
+            
+            const deleteButton = isGenerated ? 
+              '<span class="px-2 py-1 text-xs rounded bg-gray-100 text-gray-400">Auto</span>' :
+              `<button class="px-2 py-1 text-xs rounded border text-red-600" data-hol-del-id="${r.id}">Delete</button>`;
+            
+            return `
+              <tr class="${isGenerated ? 'bg-green-50' : ''}">
+                <td class="px-3 py-2">${escapeHtml(r.holiday_date || r.date || '')}</td>
+                <td class="px-3 py-2">${escapeHtml(r.holiday_name || r.name || '')}</td>
+                <td class="px-3 py-2">${escapeHtml(r.description || '')}</td>
+                <td class="px-3 py-2">${typeBadge}</td>
+                <td class="px-3 py-2">${deleteButton}</td>
+              </tr>
+            `;
+          }).join('');
           tbody.querySelectorAll('[data-hol-del-id]')?.forEach(btn => btn.addEventListener('click', async (e) => {
             const id = Number(e.currentTarget.getAttribute('data-hol-del-id'));
             if (!id) return;
@@ -1331,23 +1373,95 @@ export async function render() {
       const date = (document.getElementById('syscfg-hol-date')?.value || '').trim();
       const name = (document.getElementById('syscfg-hol-name')?.value || '').trim();
       const desc = (document.getElementById('syscfg-hol-desc')?.value || '').trim();
+      const isRecurring = document.getElementById('syscfg-hol-recurring')?.checked || false;
+      
       if (!date || !name){ setHolStatus('Date and Name are required', 'error'); return; }
       setHolStatus('Adding...');
       try {
         const fd = new FormData();
         fd.append('operation', 'create');
-        fd.append('json', JSON.stringify({ holiday_date: date, holiday_name: name, description: desc }));
+        fd.append('json', JSON.stringify({ 
+          holiday_date: date, 
+          holiday_name: name, 
+          description: desc,
+          is_recurring: isRecurring
+        }));
         const res = await axios.post(`${apiBase}/holidays.php`, fd);
         if (res && res.data && res.data.success) {
           setHolStatus('Holiday added', 'success');
           try { document.getElementById('syscfg-hol-date').value = ''; } catch {}
           try { document.getElementById('syscfg-hol-name').value = ''; } catch {}
           try { document.getElementById('syscfg-hol-desc').value = ''; } catch {}
+          try { document.getElementById('syscfg-hol-recurring').checked = false; } catch {}
           await loadHolidays();
         } else {
-          setHolStatus('Failed to add holiday', 'error');
+          setHolStatus(res.data?.message || 'Failed to add holiday', 'error');
         }
-      } catch { setHolStatus('Failed to add holiday', 'error'); }
+      } catch (error) { 
+        setHolStatus('Failed to add holiday', 'error'); 
+      }
+    }
+
+    async function generateRecurringHolidays(){
+      const year = document.getElementById('syscfg-hol-year')?.value;
+      if (!year || year < 2020 || year > 2030) {
+        setHolStatus('Please enter a valid year (2020-2030)', 'error');
+        return;
+      }
+      
+      if (!confirm(`Generate recurring holidays for ${year}? This will create holidays like New Year, Christmas, etc. for the specified year.`)) {
+        return;
+      }
+      
+      setHolStatus('Generating recurring holidays...');
+      try {
+        const fd = new FormData();
+        fd.append('operation', 'generate_recurring');
+        fd.append('json', JSON.stringify({ year: parseInt(year) }));
+        const res = await axios.post(`${apiBase}/holidays.php`, fd);
+        
+        if (res && res.data && res.data.success) {
+          const message = res.data.message || `Generated ${res.data.created || 0} holidays for ${year}`;
+          setHolStatus(message, 'success');
+          await loadHolidays();
+        } else {
+          setHolStatus(res.data?.message || 'Failed to generate recurring holidays', 'error');
+        }
+      } catch (error) { 
+        setHolStatus('Failed to generate recurring holidays', 'error'); 
+      }
+    }
+
+    async function autoGenerateAllYears(){
+      const currentYear = new Date().getFullYear();
+      const years = [currentYear, currentYear + 1, currentYear + 2, currentYear + 3, currentYear + 4];
+      
+      if (!confirm(`Generate recurring holidays for years ${years.join(', ')}? This will create holidays like New Year, Christmas, etc. for all these years.`)) {
+        return;
+      }
+      
+      setHolStatus('Generating recurring holidays for multiple years...');
+      let totalCreated = 0;
+      let totalSkipped = 0;
+      
+      try {
+        for (const year of years) {
+          const fd = new FormData();
+          fd.append('operation', 'generate_recurring');
+          fd.append('json', JSON.stringify({ year: year }));
+          const res = await axios.post(`${apiBase}/holidays.php`, fd);
+          
+          if (res && res.data && res.data.success) {
+            totalCreated += res.data.created || 0;
+            totalSkipped += res.data.skipped || 0;
+          }
+        }
+        
+        setHolStatus(`Generated ${totalCreated} holidays across ${years.length} years (${totalSkipped} already existed)`, 'success');
+        await loadHolidays();
+      } catch (error) { 
+        setHolStatus('Failed to generate recurring holidays', 'error'); 
+      }
     }
 
     const saveBtn = document.getElementById('syscfg-save');
@@ -1356,6 +1470,14 @@ export async function render() {
     if (addHolBtn) addHolBtn.addEventListener('click', addHoliday);
     const refreshHolBtn = document.getElementById('syscfg-hol-refresh');
     if (refreshHolBtn) refreshHolBtn.addEventListener('click', loadHolidays);
+    const generateHolBtn = document.getElementById('syscfg-hol-generate');
+    if (generateHolBtn) generateHolBtn.addEventListener('click', generateRecurringHolidays);
+    const autoGenerateBtn = document.getElementById('syscfg-hol-auto-generate');
+    if (autoGenerateBtn) autoGenerateBtn.addEventListener('click', autoGenerateAllYears);
+
+    // Set default year to current year
+    const yearInput = document.getElementById('syscfg-hol-year');
+    if (yearInput) yearInput.value = new Date().getFullYear();
 
     loadSettings();
   }

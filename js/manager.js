@@ -1771,7 +1771,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     return;
   }
   fillProfile(me);
-  wireLogout();
+  wireHelp();
   wireProfileMenu();
   // Ensure notification header is always wired regardless of the initial route
   wireHeader();
@@ -1807,12 +1807,30 @@ function fillProfile(user){
   syncManagerHeaderAvatar(user);
 }
 
-function wireLogout(){
-  const btn = document.getElementById('btn-logout');
+function wireHelp(){
+  const btn = document.getElementById('btn-help');
   if (!btn) return;
-  btn.addEventListener('click', async () => {
-    try { await axios.get(`${baseApiUrl}/auth.php`, { params: { operation: 'logout' }, withCredentials: true }); } catch {}
-    location.href = './login.html';
+  btn.addEventListener('click', () => {
+    Swal.fire({
+      title: 'Help & Support',
+      html: `
+        <div class="text-left">
+          <p class="mb-3">Need assistance? Here are some ways to get help:</p>
+          <ul class="list-disc list-inside space-y-2 text-sm">
+            <li><strong>System Administrator:</strong> Contact your IT department</li>
+            <li><strong>HR Support:</strong> Reach out to your HR team</li>
+            <li><strong>Technical Issues:</strong> Report bugs or technical problems</li>
+            <li><strong>Training:</strong> Request additional training sessions</li>
+          </ul>
+          <p class="mt-4 text-sm text-gray-600">
+            For immediate assistance, please contact your system administrator or HR department.
+          </p>
+        </div>
+      `,
+      icon: 'info',
+      confirmButtonText: 'Got it',
+      confirmButtonColor: '#3b82f6'
+    });
   });
 }
 
@@ -1839,8 +1857,21 @@ function wireProfileMenu(){
   }
   if (headerLogout){
     headerLogout.addEventListener('click', async () => {
-      try { await axios.get(`${baseApiUrl}/auth.php`, { params: { operation: 'logout' }, withCredentials: true }); } catch {}
-      location.href = './login.html';
+      const result = await Swal.fire({
+        title: 'Confirm Logout',
+        text: 'Are you sure you want to logout?',
+        icon: 'question',
+        showCancelButton: true,
+        confirmButtonColor: '#dc2626',
+        cancelButtonColor: '#6b7280',
+        confirmButtonText: 'Yes, logout',
+        cancelButtonText: 'Cancel'
+      });
+      
+      if (result.isConfirmed) {
+        try { await axios.get(`${baseApiUrl}/auth.php`, { params: { operation: 'logout' }, withCredentials: true }); } catch {}
+        location.href = './login.html';
+      }
     });
   }
 }
